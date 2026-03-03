@@ -8,7 +8,7 @@ from groq import Groq
 
 # --- CONFIGURATION ---
 TELEGRAM_TOKEN = "8785914734:AAGDnXeKnVgmEqZpf3keMMQPUMk8eO3P-N4"
-GROQ_API_KEY = "PASTE_YOUR_GROQ_KEY_HERE"
+GROQ_API_KEY = "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"
 
 client = Groq(api_key=GROQ_API_KEY)
 app = Flask('')
