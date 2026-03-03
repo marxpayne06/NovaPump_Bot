@@ -8,7 +8,7 @@ from openai import OpenAI
 
 # 1. CONFIGURATION
 TELEGRAM_TOKEN = "8785914734:AAGDnXeKnVgmEqZpf3keMMQPUMk8eO3P-N4"
-AI_API_KEY = "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"
+AI_API_KEY = "AIzaSyDZHGnhwv_IKA03vJA05TEPYHnzsiYpxqI"
 
 client = OpenAI(api_key=AI_API_KEY)
 app = Flask('')
