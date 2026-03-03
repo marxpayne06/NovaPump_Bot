@@ -10,7 +10,7 @@ from google.genai import types
 
 # --- 1. CONFIGURATION ---
 TELEGRAM_TOKEN = "8785914734:AAGDnXeKnVgmEqZpf3keMMQPUMk8eO3P-N4"
-GEMINI_API_KEY = "AIzaSyD740ZaetuuQ0ZyF4XLeLajlzPemItA_IE"
+GEMINI_API_KEY = "AIzaSyCyNgMAOpuk5PbfNYxX6pRvc3CpCPiFL1o"
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 app = Flask('')
