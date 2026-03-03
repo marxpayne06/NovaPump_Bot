@@ -4,81 +4,57 @@ from threading import Thread
 from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
-from openai import OpenAI
+from google import genai
 
 # 1. CONFIGURATION
-TELEGRAM_TOKEN = "8785914734:AAGDnXeKnVgmEqZpf3keMMQPUMk8eO3P-N4"
-AI_API_KEY = "AIzaSyDZHGnhwv_IKA03vJA05TEPYHnzsiYpxqI"
+TELEGRAM_TOKEN = "PASTE_YOUR_TELEGRAM_TOKEN_HERE"
+GEMINI_API_KEY = "AIzaSyDZHGnhwv_IKA03vJA05TEPYHnzsiYpxqI"
 
-client = OpenAI(api_key=AI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 app = Flask('')
 
-# 2. WAKE UP SERVER (For 24/7 Uptime)
 @app.route('/')
-def home():
-    return "NovaPump is Active!"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+def home(): return "NovaPump Gemini is Active!"
 
 def keep_alive():
-    t = Thread(target=run_flask)
+    t = Thread(target=lambda: app.run(host='0.0.0.0', port=8080))
     t.daemon = True
     t.start()
 
-# 3. MEMORY SYSTEM
+# 2. DATABASE & KNOWLEDGE
 def init_db():
     conn = sqlite3.connect('novapump.db')
-    c = conn.cursor()
-    c.execute('CREATE TABLE IF NOT EXISTS chat (user_id INTEGER, role TEXT, content TEXT)')
+    conn.cursor().execute('CREATE TABLE IF NOT EXISTS chat (user_id INTEGER, role TEXT, content TEXT)')
     conn.commit()
     conn.close()
 
-def save_chat(user_id, role, content):
-    conn = sqlite3.connect('novapump.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO chat VALUES (?, ?, ?)", (user_id, role, content))
-    conn.commit()
-    conn.close()
+def get_custom_knowledge():
+    try:
+        with open("novapump_knowledge.txt", "r") as f: return f.read()
+    except: return "Identity: NovaPump. Creator: marxpayne (@marxpayne6)."
 
-def get_history(user_id):
-    conn = sqlite3.connect('novapump.db')
-    c = conn.cursor()
-    c.execute("SELECT role, content FROM chat WHERE user_id=? ORDER BY ROWID DESC LIMIT 10", (user_id,))
-    rows = c.fetchall()[::-1]
-    conn.close()
-    return [{"role": r, "content": c} for r, c in rows]
-
-# 4. BOT RESPONSE LOGIC
+# 3. CHAT LOGIC
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
-    
     user_id = update.message.from_user.id
     user_text = update.message.text
 
-    # Creator Check
-    if any(word in user_text.lower() for word in ["creator", "made you", "who is marx"]):
-        await update.message.reply_text("I was created by marxpayne. Contact him here: @marxpayne6")
+    if any(word in user_text.lower() for word in ["creator", "made you"]):
+        await update.message.reply_text("I was created by marxpayne. Link: @marxpayne6")
         return
 
-    # AI Brain Logic
-    history = get_history(user_id)
-    system_msg = {
-        "role": "system",
-        "content": "Your name is NovaPump. You are a genius crypto AI. Your creator is marxpayne (@marxpayne6). Be witty and helpful."
-    }
-    messages = [system_msg] + history + [{"role": "user", "content": user_text}]
+    # Combine knowledge + prompt
+    knowledge = get_custom_knowledge()
+    full_prompt = f"System: Your name is NovaPump. Creator: marxpayne (@marxpayne6). Use this info: {knowledge}\n\nUser: {user_text}"
 
     try:
-        response = client.chat.completions.create(model="gpt-3.5-turbo", messages=messages)
-        answer = response.choices[0].message.content
-        save_chat(user_id, "user", user_text)
-        save_chat(user_id, "assistant", answer)
-        await update.message.reply_text(answer)
-    except:
-        await update.message.reply_text("I'm recalibrating. Try again!")
+        # Gemini 2.0 Flash is free and extremely fast
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=full_prompt)
+        await update.message.reply_text(response.text)
+    except Exception as e:
+        print(f"Error: {e}")
+        await update.message.reply_text("NovaPump is thinking... try again!")
 
-# 5. START
 if __name__ == '__main__':
     init_db()
     keep_alive()
