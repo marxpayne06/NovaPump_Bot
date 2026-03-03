@@ -7,7 +7,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from google import genai
 
 # 1. CONFIGURATION
-TELEGRAM_TOKEN = "PASTE_YOUR_TELEGRAM_TOKEN_HERE"
+TELEGRAM_TOKEN = "8785914734:AAGDnXeKnVgmEqZpf3keMMQPUMk8eO3P-N4"
 GEMINI_API_KEY = "AIzaSyDZHGnhwv_IKA03vJA05TEPYHnzsiYpxqI"
 
 client = genai.Client(api_key=GEMINI_API_KEY)
