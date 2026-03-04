@@ -1,35 +1,45 @@
 import os
 import sqlite3
+import asyncio
 from threading import Thread
 from flask import Flask
-from telegram import Update
+from telegram import Update, ChatPermissions, constants
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 from groq import Groq
 
-# --- CONFIGURATION (INTEGRATED) ---
+# --- CONFIGURATION ---
 TELEGRAM_TOKEN = "8785914734:AAGDnXeKnVgmEqZpf3keMMQPUMk8eO3P-N4"
 GROQ_API_KEY = "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"
 CREATOR_HANDLE = "@Marx_payne2"
+BLACKLIST = ["scam", "spam", "f**k", "sh*t"]
+
+# --- CUSTOMIZE YOUR RULES HERE ---
+GROUP_RULES = (
+    "📜 *Group Rules*\n\n"
+    "1. Be respectful to everyone.\n"
+    "2. No spamming or unauthorized links.\n"
+    "3. No offensive language (Auto-deleted).\n"
+    f"4. For support, contact {CREATOR_HANDLE}.\n\n"
+    "Failure to follow rules may lead to a mute or ban."
+)
 
 client = Groq(api_key=GROQ_API_KEY)
 app = Flask('')
 
 @app.route('/')
-def home(): return "NovaPump Groq (Long-Term Memory) is Active!"
+def home(): return "NovaPump Ultimate Mode Active!"
 
 def keep_alive():
     t = Thread(target=lambda: app.run(host='0.0.0.0', port=8080))
     t.daemon = True
     t.start()
 
-# --- DATABASE SYSTEM (SQLITE) ---
+# --- DATABASE & MEMORY ---
 def init_db():
     conn = sqlite3.connect('novapump_memory.db', check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS history 
-                      (user_id INTEGER, role TEXT, content TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS summaries 
-                      (user_id INTEGER PRIMARY KEY, summary TEXT)''')
+    cursor.execute('CREATE TABLE IF NOT EXISTS history (user_id INTEGER, role TEXT, content TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS summaries (user_id INTEGER PRIMARY KEY, summary TEXT)')
     conn.commit()
     conn.close()
 
@@ -43,107 +53,101 @@ def save_message(user_id, role, content):
 def get_history(user_id):
     conn = sqlite3.connect('novapump_memory.db', check_same_thread=False)
     cursor = conn.cursor()
-    # Increased limit to 30 messages
     cursor.execute("SELECT role, content FROM history WHERE user_id = ? ORDER BY rowid DESC LIMIT 30", (user_id,))
     rows = cursor.fetchall()[::-1]
     conn.close()
     return [{"role": r, "content": c} for r, c in rows]
 
-def get_summary(user_id):
-    conn = sqlite3.connect('novapump_memory.db', check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("SELECT summary FROM summaries WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else ""
+# --- WELCOME & AUTO-CLEAN ---
+async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for member in update.message.new_chat_members:
+        if member.id == (await context.bot.get_me()).id:
+            continue
+            
+        welcome_text = f"👋 Welcome {member.first_name}! Check out the /rules and enjoy the community."
+        await update.message.reply_text(welcome_text)
+        
+        # Optional: Delete the "X joined the group" service message to keep chat clean
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)
+        except: pass
 
-# --- SUMMARIZATION ENGINE ---
-def summarize_chat(user_id, history):
-    text_to_summarize = "\n".join([f"{m['role']}: {m['content']}" for m in history])
-    try:
-        completion = client.chat.completions.create(
-            messages=[{"role": "system", "content": "Summarize the key facts from this chat into 3 sentences. Focus on user preferences and shared info."},
-                      {"role": "user", "content": text_to_summarize}],
-            model="llama-3.3-70b-versatile",
-        )
-        new_summary = completion.choices[0].message.content
-        conn = sqlite3.connect('novapump_memory.db', check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO summaries (user_id, summary) VALUES (?, ?)", (user_id, new_summary))
-        cursor.execute("DELETE FROM history WHERE user_id = ?", (user_id,))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Summarization Error: {e}")
+# --- RULES COMMAND ---
+async def show_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(GROUP_RULES, parse_mode='Markdown')
 
-# --- COMMANDS ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "👋 Hello! I'm NovaPump.\n\n"
-        "I'm here to chat and help you out. I remember our past conversations, "
-        "so we can just pick up where we left off. What's on your mind?"
-    )
-    await update.message.reply_text(welcome_text)
+# --- ADMIN FUNCTIONS ---
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id)
+    return user.status in [constants.ChatMemberStatus.ADMINISTRATOR, constants.ChatMemberStatus.OWNER]
 
-# --- CHAT LOGIC ---
+async def mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context): return
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to the user to mute them.")
+        return
+    target = update.message.reply_to_message.from_user
+    await context.bot.restrict_chat_member(update.effective_chat.id, target.id, permissions=ChatPermissions(can_send_messages=False))
+    await update.message.reply_text(f"🔇 {target.first_name} muted.")
+
+async def unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update, context): return
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Reply to the user to unmute them.")
+        return
+    target = update.message.reply_to_message.from_user
+    await context.bot.restrict_chat_member(update.effective_chat.id, target.id, permissions=ChatPermissions.all_permissions())
+    await update.message.reply_text(f"🔊 {target.first_name} unmuted.")
+
+# --- CHAT & MODERATION ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     user_id = update.message.from_user.id
     user_text = update.message.text
+    chat_type = update.message.chat.type
+    bot_obj = await context.bot.get_me()
+
+    # 1. AUTO-MODERATION
+    if any(word in user_text.lower() for word in BLACKLIST):
+        try:
+            await context.bot.delete_message(update.effective_chat.id, update.message.message_id)
+            return
+        except: pass
+
+    # 2. GROUP LOGIC (Reply if mentioned OR if user replies to bot)
+    is_reply_to_bot = update.message.reply_to_message and update.message.reply_to_message.from_user.id == bot_obj.id
     
-    # Check for issue reporting or creator inquiries
-    support_keywords = ["issue", "problem", "report", "creator", "admin", "contact", "talk to developer"]
-    if any(word in user_text.lower() for word in support_keywords):
-        await update.message.reply_text(f"For any issues, reports, or to speak with my creator, please contact {CREATOR_HANDLE} directly.")
-        return
+    if chat_type in [constants.ChatType.GROUP, constants.ChatType.SUPERGROUP]:
+        if f"@{bot_obj.username}" not in user_text and not is_reply_to_bot:
+            return
 
+    # 3. AI RESPONSE
     history = get_history(user_id)
-    summary = get_summary(user_id)
-
-    # Trigger summarization when history reaches the 30-message limit
-    if len(history) >= 29:
-        summarize_chat(user_id, history)
-        history = []
-        summary = get_summary(user_id)
-
-    # System Prompt with your specific personality rules
-    system_prompt = (
-        f"You are NovaPump. Your creator is {CREATOR_HANDLE}. "
-        "RULES: \n"
-        "1. Be chill, natural, and helpful.\n"
-        "2. Do NOT mention your name or creator unless asked.\n"
-        "3. Only talk about crypto if the user brings it up or it is necessary for the context.\n"
-        "4. If a user has a technical problem, tell them to contact your creator.\n"
-        f"Long-term memory summary: {summary}"
-    )
-
-    messages = [{"role": "system", "content": system_prompt}]
+    messages = [{"role": "system", "content": f"You are NovaPump. Creator: {CREATOR_HANDLE}. Be chill."}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})
 
     try:
-        chat_completion = client.chat.completions.create(
-            messages=messages,
-            model="llama-3.3-70b-versatile",
-        )
+        chat_completion = client.chat.completions.create(messages=messages, model="llama-3.3-70b-versatile")
         response = chat_completion.choices[0].message.content
-        
         save_message(user_id, "user", user_text)
         save_message(user_id, "assistant", response)
-        
         await update.message.reply_text(response)
-    except Exception as e:
-        print(f"Error: {e}")
-        await update.message.reply_text("I had a brief memory glitch. Could you say that again?")
+    except:
+        await update.message.reply_text("Thinking... try again.")
 
 if __name__ == '__main__':
     init_db()
     keep_alive()
     bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # Add /start command and text message handlers
-    bot_app.add_handler(CommandHandler("start", start))
+    # Handlers
+    bot_app.add_handler(CommandHandler("start", show_rules)) # Start also shows rules
+    bot_app.add_handler(CommandHandler("rules", show_rules))
+    bot_app.add_handler(CommandHandler("mute", mute))
+    bot_app.add_handler(CommandHandler("unmute", unmute))
+    bot_app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
     bot_app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
-    print("NovaPump is live and remembers everything...")
+    print("NovaPump is fully operational.")
     bot_app.run_polling()
