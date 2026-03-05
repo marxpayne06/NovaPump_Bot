@@ -100,6 +100,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text: return
     user_id = update.message.from_user.id
     user_text = update.message.text
+
+    # Cache username → ID for @mention resolution in mod commands
+    user = update.message.from_user
+    if user.username:
+        if "username_cache" not in context.bot_data:
+            context.bot_data["username_cache"] = {}
+        context.bot_data["username_cache"][user.username.lower()] = {
+            "id": user.id, "name": user.full_name
+        }
     
     # Check for issue reporting or creator inquiries
     support_keywords = ["issue", "problem", "report", "creator", "admin", "contact", "talk to developer"]
@@ -179,13 +188,29 @@ async def require_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
 
 def get_target_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
+    # Priority 1: reply to a message
     if msg.reply_to_message:
         u = msg.reply_to_message.from_user
         return u.id, u.full_name
     if context.args:
         arg = context.args[0]
+        # Priority 2: raw numeric ID
         if arg.lstrip("-").isdigit():
             return int(arg), arg
+        # Priority 3: @username — resolve via message entities
+        username = arg.lstrip("@").lower()
+        if msg.entities:
+            for entity in msg.entities:
+                if entity.type == "text_mention" and entity.user:
+                    # Telegram sent a mention with a known user object
+                    return entity.user.id, entity.user.full_name
+        # Priority 4: check bot's cached user data
+        if context.bot_data.get("username_cache"):
+            cached = context.bot_data["username_cache"].get(username)
+            if cached:
+                return cached["id"], cached["name"]
+        # Can't resolve — return username string so caller can show a useful error
+        return None, f"@{username} (could not resolve — please reply to their message instead)"
     return None, None
 
 def format_welcome(template: str, user, chat) -> str:
@@ -379,7 +404,7 @@ async def set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rules = " ".join(context.args)
     conn = sqlite3.connect('novapump_memory.db', check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO chat_rules VALUES (?, ?)", (update.effective_chat.id, rules))
+    cursor.execute("INSERT INTO chat_rules (chat_id, rules) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET rules=excluded.rules", (update.effective_chat.id, rules))
     conn.commit(); conn.close()
     await update.message.reply_text("✅ Rules updated!")
 
