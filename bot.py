@@ -402,20 +402,26 @@ async def set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Usage: /setrules <rules text>"); return
     rules = " ".join(context.args)
-    conn = sqlite3.connect('novapump_memory.db', check_same_thread=False)
+    print(f"[DEBUG] set_rules saving: chat_id={update.effective_chat.id} rules={rules!r}")
+    conn = sqlite3.connect("novapump_memory.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO chat_rules (chat_id, rules) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET rules=excluded.rules", (update.effective_chat.id, rules))
-    conn.commit(); conn.close()
+    conn.commit()
+    cursor.execute("SELECT rules FROM chat_rules WHERE chat_id = ?", (update.effective_chat.id,))
+    saved = cursor.fetchone()
+    print(f"[DEBUG] set_rules verify saved={saved}")
+    conn.close()
     await update.message.reply_text("✅ Rules updated!")
 
 async def get_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect('novapump_memory.db', check_same_thread=False)
+    conn = sqlite3.connect("novapump_memory.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("SELECT rules FROM chat_rules WHERE chat_id = ?", (update.effective_chat.id,))
     row = cursor.fetchone(); conn.close()
-    if not row:
+    print(f"[DEBUG] get_rules chat_id={update.effective_chat.id} row={row}")
+    if not row or not row[0]:
         await update.message.reply_text("No rules have been set for this chat."); return
-    await update.message.reply_text(f"📜 <b>Rules:</b>\n\n{row[0]}", parse_mode="HTML")
+    await update.message.reply_text("📜 Rules:\n\n" + row[0])
 
 async def promote(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_admin(update, context): return
